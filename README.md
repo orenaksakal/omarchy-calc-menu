@@ -145,6 +145,22 @@ git clone https://github.com/orenaksakal/omarchy-calc-menu.git
 omarchy restart shell
 ```
 
+## Security
+
+- Calculations are whitelist-based: only digits, operators, `π pi √ ^ ! %` and
+  parentheses ever reach the parser — no `eval`/`Function`, so a query cannot
+  execute code.
+- The API-key config and persisted-rate files are read through a bounded,
+  no-follow helper that refuses symlinks, requires a regular file owned by the
+  current user, and caps bytes at 8 KB. The API key is limited to 64
+  alphanumeric characters before it is embedded in a curl URL.
+- Live rate responses are capped at 64 KB (`curl --max-filesize` plus a buffer
+  ceiling) and only bounded currency-code/value pairs (≤ 200 entries, short
+  codes, sane values) are kept.
+- The persisted-rate state is written through a same-directory temporary file
+  with `600` permissions, then atomically renamed — it never follows a
+  pre-existing symlink or truncates another target.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Built on the MIT-licensed Omarchy menu plugin.

@@ -820,47 +820,88 @@ Item {
   readonly property string fxStatePath: Quickshell.env("HOME") + "/.local/state/omarchy/settings/orenaksakal.calc-menu.fx.json"
   readonly property int fxDailyMs: 24 * 3600 * 1000
 
-  FileView {
-    id: fxConfigFile
-    path: root.fxConfigPath
-    watchChanges: true
-    printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      try {
-        var cfg = JSON.parse(text())
-        root.fxApiKey = String(cfg && cfg.apiKey ? cfg.apiKey : "").trim()
-      } catch (e) { root.fxApiKey = "" }
+  // ---- bounded local reads -------------------------------------------------
+  //
+  // Config and persisted-rate files are read through a single bash helper that
+  // refuses symlinks, requires a regular file owned by the current user, and
+  // caps how many bytes reach QML (descriptor-bound, no-follow). Content is
+  // then parsed with per-field limits so only a bounded API key and bounded
+  // currency-code/value entries ever reach the shell.
+
+  readonly property int fxMaxLocalBytes: 8192
+  readonly property int fxMaxApiKeyLength: 64
+  readonly property int fxMaxRateEntries: 200
+  readonly property int fxMaxRateBytes: 65536
+
+  function queueLocalRead(target, path) {
+    if (localReadProc.running) {
+      localReadProc.pending = localReadProc.pending.concat([{ target: target, path: path }])
+      return
     }
-    onLoadFailed: root.fxApiKey = ""
+    localReadProc.target = target
+    localReadProc.collected = ""
+    localReadProc.command = ["bash", "-c", root.boundedReadCommand(path)]
+    localReadProc.running = true
   }
 
-  // Persisted fetch state: {"fetchedAt": <ms>, "rates": {...}}. Survives shell
-  // restarts so the once-a-day fetch limit is honored across reboots too.
-  FileView {
-    id: fxStateFile
-    path: root.fxStatePath
-    watchChanges: false
-    printErrors: false
-    onLoaded: {
-      try {
-        var st = JSON.parse(text())
-        var at = st && typeof st.fetchedAt === "number" ? st.fetchedAt : 0
-        var rates = st && st.rates && typeof st.rates === "object" ? st.rates : null
-        var count = 0
-        if (rates) for (var c in rates) count++
-        if (rates && count > 0 && at > 0 && Date.now() - at < root.fxDailyMs) {
-          var normalized = ({})
-          for (var code in rates) normalized[String(code).toLowerCase()] = Number(rates[code])
-          root.liveCurrencyRates = normalized
-          root.currencyRatesLoaded = true
-          root.currencyRatesFetchedAt = at
-        } else if (at > 0) {
-          root.currencyRatesFetchedAt = at
-        }
-      } catch (e) { }
+  function boundedReadCommand(path) {
+    var f = Util.shellQuote(path)
+    // -L/-f/-O reject symlinks and require an owned regular file; `timeout`
+    // bounds the read in case the path is raced to a FIFO after the checks.
+    return "f=" + f + "; [ -L \"$f\" ] && exit 1; [ -f \"$f\" ] || exit 1; [ -O \"$f\" ] || exit 1; timeout 1 head -c " + root.fxMaxLocalBytes + " \"$f\""
+  }
+
+  function applyLocalRead(target, raw) {
+    var content = String(raw || "").trim()
+    if (content.length > root.fxMaxLocalBytes) content = content.substring(0, root.fxMaxLocalBytes)
+    if (target === "config") root.applyConfigContent(content)
+    else root.applyStateContent(content)
+  }
+
+  function applyConfigContent(raw) {
+    var key = ""
+    try {
+      var cfg = JSON.parse(raw)
+      if (cfg && typeof cfg.apiKey === "string") key = cfg.apiKey.trim()
+    } catch (e) { }
+    // Only a bounded, alphanumeric key reaches the shell (it is embedded in a
+    // curl URL).
+    if (!key || key.length > root.fxMaxApiKeyLength || !/^[a-zA-Z0-9]+$/.test(key)) key = ""
+    root.fxApiKey = key
+  }
+
+  function applyStateContent(raw) {
+    try {
+      var st = JSON.parse(raw)
+      var at = st && typeof st.fetchedAt === "number" && isFinite(st.fetchedAt) ? st.fetchedAt : 0
+      var normalized = root.normalizeRates(st && st.rates)
+      if (normalized && at > 0 && Date.now() - at < root.fxDailyMs) {
+        root.liveCurrencyRates = normalized
+        root.currencyRatesLoaded = true
+        root.currencyRatesFetchedAt = at
+      } else if (at > 0) {
+        root.currencyRatesFetchedAt = at
+      }
+    } catch (e) { }
+  }
+
+  // Keep only bounded, sane currency-code/value pairs: a short code and a
+  // positive finite rate. Cap the total so a malicious feed cannot balloon the
+  // shell's memory.
+  function normalizeRates(rates) {
+    if (!rates || typeof rates !== "object") return null
+    var out = ({})
+    var count = 0
+    for (var code in rates) {
+      if (count >= root.fxMaxRateEntries) break
+      var c = String(code)
+      if (!c || c.length > 8) continue
+      var v = Number(rates[code])
+      if (typeof v !== "number" || !isFinite(v) || v <= 0 || v > 1e15) continue
+      out[c.toLowerCase()] = v
+      count++
     }
-    onLoadFailed: { }
+    return count > 0 ? out : null
   }
 
   function currencyFactor(name) {
@@ -919,6 +960,13 @@ Item {
     return String(Number(value.toFixed(2)))
   }
 
+  // Precomputed once so the per-keystroke search path never rebuilds it.
+  readonly property string conversionUnitChars: "[a-z°/²³0-9Ω$€£¥₹₽₩₺₴₫฿₦₱₪₸₾₡-]+"
+  readonly property var conversionRegex: (function() {
+    var u = root.conversionUnitChars
+    return new RegExp("^(?:convert\\s+)?(-?[0-9]+(?:\\.[0-9]+)?)\\s*(" + u + "(?:\\s" + u + ")?)\\s+(?:to|in)\\s+(" + u + "(?:\\s" + u + ")?)$")
+  })()
+
   // Parse "<amount> <from-unit> to|in <to-unit>" (units may touch the number,
   // e.g. "5ft in cm"). Returns { label, copy, approx } for a row, or null when
   // the text is not a conversion. approx is set when currency used the static
@@ -929,8 +977,7 @@ Item {
     // Move a leading currency symbol behind the amount ("£100" -> "100£")
     // so the amount-first grammar below handles it like "100£".
     text = text.replace(/^([$€£¥₹₽₩₺₴₫฿₦₱₪₸₾₡])([0-9][0-9.]*)/, "$2$1")
-    var unitChars = "[a-z°/²³0-9Ω$€£¥₹₽₩₺₴₫฿₦₱₪₸₾₡-]+"
-    var m = text.match(new RegExp("^(?:convert\\s+)?(-?[0-9]+(?:\\.[0-9]+)?)\\s*(" + unitChars + "(?:\\s" + unitChars + ")?)\\s+(?:to|in)\\s+(" + unitChars + "(?:\\s" + unitChars + ")?)$"))
+    var m = text.match(root.conversionRegex)
     if (!m) return null
 
     var amount = Number(m[1])
@@ -984,17 +1031,26 @@ Item {
     var url = "https://open.er-api.com/v6/latest/USD"
     if (root.fxApiKey) url = "https://v6.exchangerate-api.com/v6/" + root.fxApiKey + "/latest/USD"
     ratesProc.collected = ""
-    ratesProc.command = ["bash", "-lc", "curl -fsSL --max-time 8 " + Util.shellQuote(url)]
+    // --max-filesize bounds buffered output; --max-time bounds wall time.
+    ratesProc.command = ["bash", "-lc", "curl -fsSL --max-time 8 --max-filesize " + root.fxMaxRateBytes + " " + Util.shellQuote(url)]
     ratesProc.running = true
   }
 
   // Persist {fetchedAt, rates} to disk so a restart doesn't refetch within the
-  // day. Written via bash to keep the JSON out of the shell's argv quoting.
+  // day. Written through a same-directory temporary file with private
+  // permissions and atomically renamed, so the predictable state path never
+  // follows a pre-existing symlink or truncates another target.
   function saveRatesState() {
     var payload = JSON.stringify({ fetchedAt: root.currencyRatesFetchedAt, rates: root.liveCurrencyRates })
+    if (!payload || payload.length > root.fxMaxLocalBytes) return
     var dir = root.fxStatePath.replace(/\/[^/]*$/, "")
-    var cmd = "mkdir -p " + Util.shellQuote(dir) + " && printf '%s\\n' " + Util.shellQuote(payload) + " > " + Util.shellQuote(root.fxStatePath)
-    ratesStateProc.command = ["bash", "-lc", cmd]
+    var cmd = "d=" + Util.shellQuote(dir) + "; f=" + Util.shellQuote(root.fxStatePath)
+      + "; mkdir -p \"$d\" || exit 1"
+      + "; tmp=$(mktemp \"$d/.fx.XXXXXX\") || exit 1"
+      + "; chmod 600 \"$tmp\""
+      + "; printf '%s\\n' " + Util.shellQuote(payload) + " > \"$tmp\" || { rm -f \"$tmp\"; exit 1; }"
+      + "; mv -f \"$tmp\" \"$f\" || { rm -f \"$tmp\"; exit 1; }"
+    ratesStateProc.command = ["bash", "-c", cmd]
     ratesStateProc.running = true
   }
 
@@ -1567,7 +1623,11 @@ if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
     id: ratesProc
     property string collected: ""
     stdout: SplitParser {
-      onRead: function(data) { ratesProc.collected += data + "\n" }
+      onRead: function(data) {
+        // Byte ceiling on the HTTP response before it ever reaches JSON.parse.
+        if (ratesProc.collected.length < root.fxMaxRateBytes)
+          ratesProc.collected = (ratesProc.collected + data + "\n").substring(0, root.fxMaxRateBytes)
+      }
     }
     onExited: function(exitCode, exitStatus) {
       root.currencyRatesFetching = false
@@ -1578,11 +1638,10 @@ if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
       try {
         var parsed = JSON.parse(ratesProc.collected)
         // open.er-api.com answers under "rates"; exchangerate-api.com under
-        // "conversion_rates". Both are USD-anchored.
+        // "conversion_rates". Both are USD-anchored. Entries are bounded.
         var raw = parsed && (parsed.conversion_rates || parsed.rates)
-        if (parsed && raw && typeof raw === "object") {
-          var normalized = ({})
-          for (var code in raw) normalized[String(code).toLowerCase()] = Number(raw[code])
+        var normalized = root.normalizeRates(raw)
+        if (parsed && normalized) {
           root.liveCurrencyRates = normalized
           root.currencyRatesLoaded = true
           root.currencyRatesFetchedAt = Date.now()
@@ -1598,6 +1657,48 @@ if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
   Process {
     id: ratesStateProc
     running: false
+  }
+
+  // Bounded, no-follow local file reads (config + persisted rates state).
+  Process {
+    id: localReadProc
+    property string target: ""
+    property string collected: ""
+    property var pending: []
+    stdout: SplitParser {
+      onRead: function(data) { localReadProc.collected += data + "\n" }
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode === 0 && exitStatus === 0) {
+        root.applyLocalRead(localReadProc.target, localReadProc.collected)
+      } else if (localReadProc.target === "config") {
+        root.fxApiKey = ""
+      }
+      if (localReadProc.pending.length > 0) {
+        var next = localReadProc.pending.shift()
+        localReadProc.target = next.target
+        localReadProc.collected = ""
+        localReadProc.command = ["bash", "-c", root.boundedReadCommand(next.path)]
+        localReadProc.running = true
+      }
+    }
+  }
+
+  // Config (API key) is re-read every few seconds; the persisted rates state is
+  // read once shortly after startup. Both queue through localReadProc.
+  Timer {
+    id: fxConfigTimer
+    interval: 3000
+    running: true
+    repeat: true
+    onTriggered: root.queueLocalRead("config", root.fxConfigPath)
+  }
+
+  Timer {
+    id: fxStateTimer
+    interval: 1000
+    running: true
+    onTriggered: root.queueLocalRead("state", root.fxStatePath)
   }
 
   PanelWindow {
