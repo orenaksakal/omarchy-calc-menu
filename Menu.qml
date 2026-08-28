@@ -587,10 +587,150 @@ Item {
     return String(Math.round(value * 1e10) / 1e10)
   }
 
-  // A search-time row that shows the result of a calculation and copies it to
-  // the clipboard on Enter. score is far below any real match so it always
-  // surfaces first.
+  // ------------------------------------------------- unit & time conversion
+  //
+  // Queries like "10 km to miles", "5ft in cm", "2 hours to minutes", or
+  // "100°f to c" get a conversion row. Each unit maps to its base-unit factor
+  // per category; temperature uses its own formulas. Pure arithmetic still
+  // falls through to calcResult().
+
+  // category -> [name, factor-of-base]. Temperature has no factor; convertTemp
+  // handles it. Keys are lowercase and stripped of any "°" before lookup.
+  readonly property var unitTable: ({
+    // length (base: metre)
+    "mm": ["length", 0.001], "millimeter": ["length", 0.001], "millimeters": ["length", 0.001], "millimetre": ["length", 0.001],
+    "cm": ["length", 0.01], "centimeter": ["length", 0.01], "centimeters": ["length", 0.01],
+    "m": ["length", 1], "meter": ["length", 1], "meters": ["length", 1], "metre": ["length", 1], "metres": ["length", 1],
+    "km": ["length", 1000], "kilometer": ["length", 1000], "kilometers": ["length", 1000],
+    "in": ["length", 0.0254], "inch": ["length", 0.0254], "inches": ["length", 0.0254],
+    "ft": ["length", 0.3048], "foot": ["length", 0.3048], "feet": ["length", 0.3048],
+    "yd": ["length", 0.9144], "yard": ["length", 0.9144], "yards": ["length", 0.9144],
+    "mi": ["length", 1609.344], "mile": ["length", 1609.344], "miles": ["length", 1609.344],
+    // mass (base: kilogram)
+    "mg": ["mass", 1e-6], "milligram": ["mass", 1e-6], "milligrams": ["mass", 1e-6],
+    "g": ["mass", 0.001], "gram": ["mass", 0.001], "grams": ["mass", 0.001], "gramme": ["mass", 0.001],
+    "kg": ["mass", 1], "kilogram": ["mass", 1], "kilograms": ["mass", 1],
+    "t": ["mass", 1000], "tonne": ["mass", 1000], "tonnes": ["mass", 1000], "ton": ["mass", 1000], "tons": ["mass", 1000],
+    "oz": ["mass", 0.028349523125], "ounce": ["mass", 0.028349523125], "ounces": ["mass", 0.028349523125],
+    "lb": ["mass", 0.45359237], "pound": ["mass", 0.45359237], "pounds": ["mass", 0.45359237],
+    "st": ["mass", 6.35029318], "stone": ["mass", 6.35029318], "stones": ["mass", 6.35029318],
+    // volume (base: litre)
+    "ml": ["volume", 0.001], "milliliter": ["volume", 0.001], "milliliters": ["volume", 0.001], "millilitre": ["volume", 0.001],
+    "cl": ["volume", 0.01], "centiliter": ["volume", 0.01],
+    "l": ["volume", 1], "liter": ["volume", 1], "liters": ["volume", 1], "litre": ["volume", 1], "litres": ["volume", 1],
+    "fl oz": ["volume", 0.0295735295625], "fluid ounce": ["volume", 0.0295735295625], "fluid ounces": ["volume", 0.0295735295625],
+    "cup": ["volume", 0.2365882365], "cups": ["volume", 0.2365882365],
+    "pt": ["volume", 0.473176473], "pint": ["volume", 0.473176473], "pints": ["volume", 0.473176473],
+    "qt": ["volume", 0.946352946], "quart": ["volume", 0.946352946], "quarts": ["volume", 0.946352946],
+    "gal": ["volume", 3.785411784], "gallon": ["volume", 3.785411784], "gallons": ["volume", 3.785411784],
+    "tbsp": ["volume", 0.01478676478125], "tablespoon": ["volume", 0.01478676478125], "tablespoons": ["volume", 0.01478676478125],
+    "tsp": ["volume", 0.00492892159375], "teaspoon": ["volume", 0.00492892159375], "teaspoons": ["volume", 0.00492892159375],
+    // time (base: second). month/year are calendar approximations (30d / 365d).
+    "ms": ["time", 0.001], "millisecond": ["time", 0.001], "milliseconds": ["time", 0.001],
+    "s": ["time", 1], "sec": ["time", 1], "secs": ["time", 1], "second": ["time", 1], "seconds": ["time", 1],
+    "min": ["time", 60], "mins": ["time", 60], "minute": ["time", 60], "minutes": ["time", 60],
+    "h": ["time", 3600], "hr": ["time", 3600], "hrs": ["time", 3600], "hour": ["time", 3600], "hours": ["time", 3600],
+    "d": ["time", 86400], "day": ["time", 86400], "days": ["time", 86400],
+    "wk": ["time", 604800], "week": ["time", 604800], "weeks": ["time", 604800],
+    "mo": ["time", 2592000], "month": ["time", 2592000], "months": ["time", 2592000],
+    "yr": ["time", 31536000], "y": ["time", 31536000], "year": ["time", 31536000], "years": ["time", 31536000],
+    // temperature (special formulas, no factor)
+    "c": ["temp"], "celsius": ["temp"],
+    "f": ["temp"], "fahrenheit": ["temp"],
+    "k": ["temp"], "kelvin": ["temp"]
+  })
+
+  function unitLookup(name) {
+    var key = String(name || "").toLowerCase().replace(/°/g, "")
+    var entry = root.unitTable[key]
+    if (!entry) return null
+    if (entry[0] === "temp") return { category: "temp", key: key }
+    return { category: entry[0], factor: entry[1], key: key }
+  }
+
+  function tempKey(name) {
+    var key = String(name || "").toLowerCase().replace(/°/g, "")
+    if (key === "c" || key === "celsius") return "c"
+    if (key === "f" || key === "fahrenheit") return "f"
+    if (key === "k" || key === "kelvin") return "k"
+    return ""
+  }
+
+  function convertTemp(value, fromUnit, toUnit) {
+    var from = root.tempKey(fromUnit)
+    var to = root.tempKey(toUnit)
+    if (!from || !to || from === to) return value
+    var celsius
+    if (from === "c") celsius = value
+    else if (from === "f") celsius = (value - 32) * 5 / 9
+    else celsius = value - 273.15
+    if (to === "c") return celsius
+    if (to === "f") return celsius * 9 / 5 + 32
+    return celsius + 273.15
+  }
+
+  // Format a conversion result to a reasonable number of significant digits,
+  // dropping trailing zeros.
+  function formatNumber(value) {
+    if (value === 0) return "0"
+    var abs = Math.abs(value)
+    var digits = abs >= 10000 ? 2 : abs >= 1 ? 6 : abs >= 0.0001 ? 8 : 10
+    return String(Number(value.toFixed(digits)))
+  }
+
+  // Parse "<amount> <from-unit> to|in <to-unit>" (units may touch the number,
+  // e.g. "5ft in cm"). Returns { label, copy } for a row, or null when the
+  // text is not a conversion.
+  function convertResult(input) {
+    var text = String(input || "").toLowerCase().trim()
+    if (!text || text.length > 200) return null
+    var m = text.match(/^(?:convert\s+)?(-?[0-9]+(?:\.[0-9]+)?)\s*([a-z°]+(?:\s[a-z°]+)?)\s+(?:to|in)\s+([a-z°]+(?:\s[a-z°]+)?)$/)
+    if (!m) return null
+
+    var amount = Number(m[1])
+    var fromUnit = m[2].trim()
+    var toUnit = m[3].trim()
+    var from = root.unitLookup(fromUnit)
+    var to = root.unitLookup(toUnit)
+    if (!from || !to || from.category !== to.category) return null
+
+    var result
+    if (from.category === "temp") result = root.convertTemp(amount, fromUnit, toUnit)
+    else result = amount * from.factor / to.factor
+    if (typeof result !== "number" || !isFinite(result)) return null
+
+    var displayAmount = String(amount)
+    if (Math.round(amount) !== amount) displayAmount = String(Number(amount))
+    return {
+      label: displayAmount + " " + fromUnit + " → " + root.formatNumber(result) + " " + toUnit,
+      copy: root.formatNumber(result) + " " + toUnit
+    }
+  }
+
+  // A search-time row that shows the result of a calculation or conversion and
+  // copies it to the clipboard on Enter. score is far below any real match so
+  // it always surfaces first.
   function calcRow(query) {
+    var conv = root.convertResult(query)
+    if (conv) {
+      return {
+        itemId: "calc.result",
+        kind: "calc",
+        icon: "≈",
+        iconFont: "",
+        appIcon: "",
+        appId: "",
+        label: conv.label,
+        target: "",
+        detail: "Convert · Enter to copy",
+        path: "",
+        childCount: 0,
+        action: "printf '%s' " + Util.shellQuote(conv.copy) + " | wl-copy",
+        provider: "",
+        score: -1000000,
+        section: ""
+      }
+    }
     var result = root.calcResult(query)
     if (result === "") return null
     return {
