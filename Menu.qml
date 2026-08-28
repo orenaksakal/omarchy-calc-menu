@@ -614,6 +614,11 @@ Item {
     "oz": ["mass", 0.028349523125], "ounce": ["mass", 0.028349523125], "ounces": ["mass", 0.028349523125],
     "lb": ["mass", 0.45359237], "pound": ["mass", 0.45359237], "pounds": ["mass", 0.45359237],
     "st": ["mass", 6.35029318], "stone": ["mass", 6.35029318], "stones": ["mass", 6.35029318],
+    "kt": ["mass", 1000000], "kiloton": ["mass", 1000000], "kilotonne": ["mass", 1000000], "kilotonnes": ["mass", 1000000],
+    "mt": ["mass", 1000000000], "megaton": ["mass", 1000000000], "megatonne": ["mass", 1000000000], "megatonnes": ["mass", 1000000000],
+    "gt": ["mass", 1000000000000], "gigaton": ["mass", 1000000000000], "gigatonne": ["mass", 1000000000000],
+    "lt": ["mass", 1016.0469088], "long ton": ["mass", 1016.0469088], "long tons": ["mass", 1016.0469088],
+    "short ton": ["mass", 907.18474], "short tons": ["mass", 907.18474],
     // volume (base: litre)
     "ml": ["volume", 0.001], "milliliter": ["volume", 0.001], "milliliters": ["volume", 0.001], "millilitre": ["volume", 0.001],
     "cl": ["volume", 0.01], "centiliter": ["volume", 0.01],
@@ -625,6 +630,22 @@ Item {
     "gal": ["volume", 3.785411784], "gallon": ["volume", 3.785411784], "gallons": ["volume", 3.785411784],
     "tbsp": ["volume", 0.01478676478125], "tablespoon": ["volume", 0.01478676478125], "tablespoons": ["volume", 0.01478676478125],
     "tsp": ["volume", 0.00492892159375], "teaspoon": ["volume", 0.00492892159375], "teaspoons": ["volume", 0.00492892159375],
+    // data (base: byte). kb/mb/gb/tb are decimal; KiB/MiB/GiB/TiB are binary.
+    "bit": ["data", 0.125], "bits": ["data", 0.125],
+    "b": ["data", 1], "byte": ["data", 1], "bytes": ["data", 1],
+    "kb": ["data", 1000], "kilobyte": ["data", 1000], "kilobytes": ["data", 1000],
+    "mb": ["data", 1000000], "megabyte": ["data", 1000000], "megabytes": ["data", 1000000],
+    "gb": ["data", 1000000000], "gigabyte": ["data", 1000000000], "gigabytes": ["data", 1000000000],
+    "tb": ["data", 1000000000000], "terabyte": ["data", 1000000000000], "terabytes": ["data", 1000000000000],
+    "pb": ["data", 1000000000000000], "petabyte": ["data", 1000000000000000], "petabytes": ["data", 1000000000000000],
+    "kbit": ["data", 125], "kilobit": ["data", 125], "kilobits": ["data", 125],
+    "mbit": ["data", 125000], "megabit": ["data", 125000], "megabits": ["data", 125000],
+    "gbit": ["data", 125000000], "gigabit": ["data", 125000000], "gigabits": ["data", 125000000],
+    "tbit": ["data", 125000000000], "terabit": ["data", 125000000000], "terabits": ["data", 125000000000],
+    "kib": ["data", 1024], "kibibyte": ["data", 1024],
+    "mib": ["data", 1048576], "mebibyte": ["data", 1048576],
+    "gib": ["data", 1073741824], "gibibyte": ["data", 1073741824],
+    "tib": ["data", 1099511627776], "tibibyte": ["data", 1099511627776],
     // time (base: second). month/year are calendar approximations (30d / 365d).
     "ms": ["time", 0.001], "millisecond": ["time", 0.001], "milliseconds": ["time", 0.001],
     "s": ["time", 1], "sec": ["time", 1], "secs": ["time", 1], "second": ["time", 1], "seconds": ["time", 1],
@@ -634,18 +655,53 @@ Item {
     "wk": ["time", 604800], "week": ["time", 604800], "weeks": ["time", 604800],
     "mo": ["time", 2592000], "month": ["time", 2592000], "months": ["time", 2592000],
     "yr": ["time", 31536000], "y": ["time", 31536000], "year": ["time", 31536000], "years": ["time", 31536000],
+    // speed (base: metre/second)
+    "m/s": ["speed", 1], "mps": ["speed", 1],
+    "km/h": ["speed", 0.2777777777777778], "kmh": ["speed", 0.2777777777777778], "kph": ["speed", 0.2777777777777778],
+    "mph": ["speed", 0.44704],
+    "knot": ["speed", 0.5144444444444445], "knots": ["speed", 0.5144444444444445], "kn": ["speed", 0.5144444444444445],
+    "ft/s": ["speed", 0.3048], "fps": ["speed", 0.3048],
     // temperature (special formulas, no factor)
     "c": ["temp"], "celsius": ["temp"],
     "f": ["temp"], "fahrenheit": ["temp"],
     "k": ["temp"], "kelvin": ["temp"]
   })
 
+  // Currency uses live rates when reachable, falling back to these
+  // approximate USD-anchored rates (units of currency per 1 USD) when the
+  // live fetch is unavailable. Rows built on these are flagged approximate.
+  readonly property var staticCurrencyRates: ({
+    "usd": 1, "eur": 0.92, "gbp": 0.79, "jpy": 149, "cny": 7.2, "inr": 83,
+    "cad": 1.37, "aud": 1.52, "chf": 0.88, "sek": 10.6, "nok": 10.8, "dkk": 6.9,
+    "nzd": 1.67, "sgd": 1.34, "hkd": 7.8, "krw": 1340, "brl": 5.5, "mxn": 18.5,
+    "rub": 92, "try": 35, "zar": 18.5, "aed": 3.67, "sar": 3.75, "qar": 3.64,
+    "pln": 4.05, "czk": 23.5, "huf": 362, "ils": 3.7, "thb": 36, "myr": 4.4,
+    "idr": 15800, "php": 57, "vnd": 25500, "egp": 49, "ngn": 1550, "kwd": 0.31,
+    "bdt": 110, "pkr": 278, "lkr": 300, "uzs": 12600, "kes": 130
+  })
+
+  property var liveCurrencyRates: ({})
+  property bool currencyRatesLoaded: false
+  property int currencyRatesFetchedAt: 0
+  property bool currencyRatesFetching: false
+
+  function currencyFactor(name) {
+    var key = String(name || "").toLowerCase()
+    if (root.liveCurrencyRates[key] !== undefined) return Number(root.liveCurrencyRates[key])
+    var staticRate = root.staticCurrencyRates[key]
+    return staticRate !== undefined ? Number(staticRate) : undefined
+  }
+
   function unitLookup(name) {
     var key = String(name || "").toLowerCase().replace(/°/g, "")
     var entry = root.unitTable[key]
-    if (!entry) return null
-    if (entry[0] === "temp") return { category: "temp", key: key }
-    return { category: entry[0], factor: entry[1], key: key }
+    if (entry) {
+      if (entry[0] === "temp") return { category: "temp", key: key }
+      return { category: entry[0], factor: entry[1], key: key }
+    }
+    var factor = root.currencyFactor(key)
+    if (factor !== undefined) return { category: "currency", factor: factor, key: key }
+    return null
   }
 
   function tempKey(name) {
@@ -679,12 +735,13 @@ Item {
   }
 
   // Parse "<amount> <from-unit> to|in <to-unit>" (units may touch the number,
-  // e.g. "5ft in cm"). Returns { label, copy } for a row, or null when the
-  // text is not a conversion.
+  // e.g. "5ft in cm"). Returns { label, copy, approx } for a row, or null when
+  // the text is not a conversion. approx is set when currency used the static
+  // fallback rate; a live fetch (if reachable) replaces it shortly after.
   function convertResult(input) {
     var text = String(input || "").toLowerCase().trim()
     if (!text || text.length > 200) return null
-    var m = text.match(/^(?:convert\s+)?(-?[0-9]+(?:\.[0-9]+)?)\s*([a-z°]+(?:\s[a-z°]+)?)\s+(?:to|in)\s+([a-z°]+(?:\s[a-z°]+)?)$/)
+    var m = text.match(/^(?:convert\s+)?(-?[0-9]+(?:\.[0-9]+)?)\s*([a-z°/]+(?:\s[a-z°/]+)?)\s+(?:to|in)\s+([a-z°/]+(?:\s[a-z°/]+)?)$/)
     if (!m) return null
 
     var amount = Number(m[1])
@@ -695,16 +752,47 @@ Item {
     if (!from || !to || from.category !== to.category) return null
 
     var result
-    if (from.category === "temp") result = root.convertTemp(amount, fromUnit, toUnit)
-    else result = amount * from.factor / to.factor
+    var approx = false
+    if (from.category === "temp") {
+      result = root.convertTemp(amount, fromUnit, toUnit)
+    } else if (from.category === "currency") {
+      // Rates are "units of currency per 1 USD", so the conversion inverts
+      // relative to physical units. Kick off a live refresh in the background.
+      result = amount * to.factor / from.factor
+      approx = !root.currencyRatesLoaded
+      root.ensureCurrencyRates()
+    } else {
+      result = amount * from.factor / to.factor
+    }
     if (typeof result !== "number" || !isFinite(result)) return null
 
     var displayAmount = String(amount)
     if (Math.round(amount) !== amount) displayAmount = String(Number(amount))
-    return {
-      label: displayAmount + " " + fromUnit + " → " + root.formatNumber(result) + " " + toUnit,
-      copy: root.formatNumber(result) + " " + toUnit
+    var displayFrom = fromUnit
+    var displayTo = toUnit
+    if (from.category === "currency") {
+      displayFrom = fromUnit.toUpperCase()
+      displayTo = toUnit.toUpperCase()
     }
+    return {
+      label: displayAmount + " " + displayFrom + " → " + root.formatNumber(result) + " " + displayTo,
+      copy: root.formatNumber(result) + " " + displayTo,
+      approx: approx
+    }
+  }
+
+  // Fetch fresh USD-anchored exchange rates in the background, once per shell
+  // session at most (refreshed every 6h; retried after 10min on failure).
+  // Static fallback rates keep currency working offline.
+  function ensureCurrencyRates() {
+    if (root.currencyRatesFetching) return
+    var age = Date.now() - root.currencyRatesFetchedAt
+    var cooldown = root.currencyRatesLoaded ? 6 * 3600 * 1000 : 10 * 60 * 1000
+    if (age < cooldown) return
+    root.currencyRatesFetching = true
+    ratesProc.collected = ""
+    ratesProc.command = ["bash", "-lc", "curl -fsSL --max-time 6 https://open.er-api.com/v6/latest/USD"]
+    ratesProc.running = true
   }
 
   // A search-time row that shows the result of a calculation or conversion and
@@ -722,7 +810,7 @@ Item {
         appId: "",
         label: conv.label,
         target: "",
-        detail: "Convert · Enter to copy",
+        detail: conv.approx ? "Approx rate · Enter to copy" : "Convert · Enter to copy",
         path: "",
         childCount: 0,
         action: "printf '%s' " + Util.shellQuote(conv.copy) + " | wl-copy",
@@ -1263,9 +1351,35 @@ Item {
       if (root.opened) root.rebuildDisplay()
       // Run the evaluation that had to stand aside. Deferred by a turn so the
       // process is settled before its command is set again.
-      if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
+if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
     }
   }
+
+  Process {
+    id: ratesProc
+    property string collected: ""
+    stdout: SplitParser {
+      onRead: function(data) { ratesProc.collected += data + "\n" }
+    }
+    onExited: function(exitCode, exitStatus) {
+      root.currencyRatesFetching = false
+      root.currencyRatesFetchedAt = Date.now()
+      if (exitCode !== 0 || exitStatus !== 0) return
+      try {
+        var parsed = JSON.parse(ratesProc.collected)
+        if (parsed && parsed.rates && typeof parsed.rates === "object") {
+          // The API keys codes in uppercase ("EUR"); normalize to lowercase so
+          // unitLookup's lowercase keys resolve against live rates.
+          var normalized = ({})
+          for (var code in parsed.rates) normalized[String(code).toLowerCase()] = Number(parsed.rates[code])
+          root.liveCurrencyRates = normalized
+          root.currencyRatesLoaded = true
+          if (root.opened) root.rebuildDisplay()
+        }
+      } catch (e) { }
+    }
+  }
+
   PanelWindow {
     id: panel
     visible: root.opened && root.rowsLoaded
