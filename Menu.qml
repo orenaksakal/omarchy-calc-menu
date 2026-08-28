@@ -512,8 +512,18 @@ Item {
   function calcResult(input) {
     var text = String(input || "").trim()
     if (!text || text.length > 200) return ""
-    if (!/^[0-9+\-*/().% ]+$/.test(text)) return ""
-    if (!/[+\-*/%]/.test(text)) return ""
+
+    // Constants and the sqrt shorthand are substituted before the whitelist so
+    // the letters never reach it. π/pi -> pi value, sqrt -> √.
+    text = text.replace(/π/g, " 3.141592653589793 ")
+    text = text.replace(/(^|[^a-z0-9])pi([^a-z0-9]|$)/gi, "$1 3.141592653589793 $2")
+    text = text.replace(/sqrt/gi, "√")
+
+    if (!/^[0-9+\-*/().% \^π√!]+$/.test(text)) return ""
+    // A trailing % (at the end or before an operator) means "divide by 100";
+    // between two numbers it stays the modulo operator.
+    text = text.replace(/%(?=\s*(?:[+\-*/^)!]|$))/g, "/100")
+    if (!/[+\-*/%\^√!]/.test(text)) return ""
 
     var tokens = []
     var i = 0
@@ -521,7 +531,7 @@ Item {
     while (i < n) {
       var ch = text.charAt(i)
       if (ch === " ") { i++; continue }
-      if ("+-*/%()".indexOf(ch) >= 0) { tokens.push({ t: "op", v: ch }); i++; continue }
+      if ("+-*/%()^√!".indexOf(ch) >= 0) { tokens.push({ t: "op", v: ch }); i++; continue }
       var num = ""
       while (i < n && "0123456789.".indexOf(text.charAt(i)) >= 0) { num += text.charAt(i); i++ }
       if (!num) return ""
@@ -546,12 +556,12 @@ Item {
     }
 
     function parseTerm() {
-      var v = parseFactor()
+      var v = parsePower()
       for (;;) {
         var op = peek()
         if (op && op.t === "op" && (op.v === "*" || op.v === "/" || op.v === "%")) {
           take()
-          var r = parseFactor()
+          var r = parsePower()
           if (op.v === "*") v = v * r
           else if (op.v === "/") v = v / r
           else v = v % r
@@ -560,20 +570,43 @@ Item {
       return v
     }
 
+    // Exponentiation binds tighter than * / and is right-associative: 2^3^2 = 2^9.
+    function parsePower() {
+      var v = parseFactor()
+      var op = peek()
+      if (op && op.t === "op" && op.v === "^") {
+        take()
+        v = Math.pow(v, parsePower())
+      }
+      return v
+    }
+
     function parseFactor() {
       var op = peek()
       if (op && op.t === "op" && op.v === "-") { take(); return -parseFactor() }
       if (op && op.t === "op" && op.v === "+") { take(); return parseFactor() }
+      if (op && op.t === "op" && op.v === "√") { take(); return Math.sqrt(parseFactor()) }
+      var value
       if (op && op.t === "op" && op.v === "(") {
         take()
-        var inner = parseExpr()
+        value = parseExpr()
         var close = take()
         if (!close || close.t !== "op" || close.v !== ")") throw new Error("mismatch")
-        return inner
+      } else {
+        var tok = take()
+        if (!tok || tok.t !== "num") throw new Error("expected number")
+        value = tok.v
       }
-      var tok = take()
-      if (!tok || tok.t !== "num") throw new Error("expected number")
-      return tok.v
+      // Postfix factorial: 5! = 120.
+      var fac = peek()
+      if (fac && fac.t === "op" && fac.v === "!") {
+        take()
+        if (value < 0 || Math.floor(value) !== value) throw new Error("bad factorial")
+        var f = 1
+        for (var fk = 2; fk <= value; fk++) f *= fk
+        value = f
+      }
+      return value
     }
 
     var value
@@ -606,6 +639,13 @@ Item {
     "ft": ["length", 0.3048], "foot": ["length", 0.3048], "feet": ["length", 0.3048],
     "yd": ["length", 0.9144], "yard": ["length", 0.9144], "yards": ["length", 0.9144],
     "mi": ["length", 1609.344], "mile": ["length", 1609.344], "miles": ["length", 1609.344],
+    "nmi": ["length", 1852], "nautical mile": ["length", 1852], "nautical miles": ["length", 1852],
+    "nm": ["length", 1e-9], "nanometer": ["length", 1e-9], "nanometers": ["length", 1e-9], "nanometre": ["length", 1e-9],
+    "micron": ["length", 1e-6], "micrometer": ["length", 1e-6], "micrometers": ["length", 1e-6],
+    "angstrom": ["length", 1e-10], "angstroms": ["length", 1e-10],
+    "mil": ["length", 2.54e-5], "thou": ["length", 2.54e-5],
+    "au": ["length", 149597870700], "astronomical unit": ["length", 149597870700],
+    "ly": ["length", 9.4607304725808e15], "light-year": ["length", 9.4607304725808e15], "light year": ["length", 9.4607304725808e15], "light years": ["length", 9.4607304725808e15],
     // mass (base: kilogram)
     "mg": ["mass", 1e-6], "milligram": ["mass", 1e-6], "milligrams": ["mass", 1e-6],
     "g": ["mass", 0.001], "gram": ["mass", 0.001], "grams": ["mass", 0.001], "gramme": ["mass", 0.001],
@@ -619,6 +659,11 @@ Item {
     "gt": ["mass", 1000000000000], "gigaton": ["mass", 1000000000000], "gigatonne": ["mass", 1000000000000],
     "lt": ["mass", 1016.0469088], "long ton": ["mass", 1016.0469088], "long tons": ["mass", 1016.0469088],
     "short ton": ["mass", 907.18474], "short tons": ["mass", 907.18474],
+    "grain": ["mass", 0.00006479891], "grains": ["mass", 0.00006479891], "gr": ["mass", 0.00006479891],
+    "carat": ["mass", 0.0002], "carats": ["mass", 0.0002], "ct": ["mass", 0.0002],
+    "slug": ["mass", 14.59390294], "slugs": ["mass", 14.59390294],
+    "ozt": ["mass", 0.0311034768], "troy ounce": ["mass", 0.0311034768], "troy ounces": ["mass", 0.0311034768],
+    "dram": ["mass", 0.0017718451953125], "drams": ["mass", 0.0017718451953125],
     // volume (base: litre)
     "ml": ["volume", 0.001], "milliliter": ["volume", 0.001], "milliliters": ["volume", 0.001], "millilitre": ["volume", 0.001],
     "cl": ["volume", 0.01], "centiliter": ["volume", 0.01],
@@ -630,6 +675,11 @@ Item {
     "gal": ["volume", 3.785411784], "gallon": ["volume", 3.785411784], "gallons": ["volume", 3.785411784],
     "tbsp": ["volume", 0.01478676478125], "tablespoon": ["volume", 0.01478676478125], "tablespoons": ["volume", 0.01478676478125],
     "tsp": ["volume", 0.00492892159375], "teaspoon": ["volume", 0.00492892159375], "teaspoons": ["volume", 0.00492892159375],
+    "m3": ["volume", 1000], "m³": ["volume", 1000], "cubic meter": ["volume", 1000], "cubic meters": ["volume", 1000], "cubic metre": ["volume", 1000],
+    "cm3": ["volume", 0.001], "cm³": ["volume", 0.001],
+    "ft3": ["volume", 28.316846592], "ft³": ["volume", 28.316846592], "cubic foot": ["volume", 28.316846592], "cubic feet": ["volume", 28.316846592], "cuft": ["volume", 28.316846592],
+    "in3": ["volume", 0.016387064], "in³": ["volume", 0.016387064], "cubic inch": ["volume", 0.016387064], "cubic inches": ["volume", 0.016387064],
+    "bbl": ["volume", 158.987294928], "barrel": ["volume", 158.987294928], "barrels": ["volume", 158.987294928],
     // data (base: byte). kb/mb/gb/tb are decimal; KiB/MiB/GiB/TiB are binary.
     "bit": ["data", 0.125], "bits": ["data", 0.125],
     "b": ["data", 1], "byte": ["data", 1], "bytes": ["data", 1],
@@ -646,6 +696,8 @@ Item {
     "mib": ["data", 1048576], "mebibyte": ["data", 1048576],
     "gib": ["data", 1073741824], "gibibyte": ["data", 1073741824],
     "tib": ["data", 1099511627776], "tibibyte": ["data", 1099511627776],
+    "eb": ["data", 1e18], "exabyte": ["data", 1e18], "exabytes": ["data", 1e18],
+    "zb": ["data", 1e21], "zettabyte": ["data", 1e21], "zettabytes": ["data", 1e21],
     // time (base: second). month/year are calendar approximations (30d / 365d).
     "ms": ["time", 0.001], "millisecond": ["time", 0.001], "milliseconds": ["time", 0.001],
     "s": ["time", 1], "sec": ["time", 1], "secs": ["time", 1], "second": ["time", 1], "seconds": ["time", 1],
@@ -655,12 +707,77 @@ Item {
     "wk": ["time", 604800], "week": ["time", 604800], "weeks": ["time", 604800],
     "mo": ["time", 2592000], "month": ["time", 2592000], "months": ["time", 2592000],
     "yr": ["time", 31536000], "y": ["time", 31536000], "year": ["time", 31536000], "years": ["time", 31536000],
+    "fortnight": ["time", 1209600], "fortnights": ["time", 1209600],
+    "decade": ["time", 315360000], "decades": ["time", 315360000],
+    "century": ["time", 3153600000], "centuries": ["time", 3153600000],
+    "millennium": ["time", 31536000000], "millennia": ["time", 31536000000],
     // speed (base: metre/second)
     "m/s": ["speed", 1], "mps": ["speed", 1],
     "km/h": ["speed", 0.2777777777777778], "kmh": ["speed", 0.2777777777777778], "kph": ["speed", 0.2777777777777778],
     "mph": ["speed", 0.44704],
-    "knot": ["speed", 0.5144444444444445], "knots": ["speed", 0.5144444444444445], "kn": ["speed", 0.5144444444444445],
+    "knot": ["speed", 0.5144444444444445], "knots": ["speed", 0.5144444444444445], "kts": ["speed", 0.5144444444444445],
     "ft/s": ["speed", 0.3048], "fps": ["speed", 0.3048],
+    // area (base: square metre)
+    "m2": ["area", 1], "m²": ["area", 1], "sqm": ["area", 1], "square meter": ["area", 1], "square meters": ["area", 1], "square metre": ["area", 1],
+    "km2": ["area", 1e6], "km²": ["area", 1e6], "sqkm": ["area", 1e6], "square kilometer": ["area", 1e6], "square kilometre": ["area", 1e6],
+    "cm2": ["area", 1e-4], "cm²": ["area", 1e-4],
+    "mm2": ["area", 1e-6], "mm²": ["area", 1e-6],
+    "ha": ["area", 10000], "hectare": ["area", 10000], "hectares": ["area", 10000],
+    "acre": ["area", 4046.8564224], "acres": ["area", 4046.8564224],
+    "ft2": ["area", 0.09290304], "ft²": ["area", 0.09290304], "sqft": ["area", 0.09290304], "square foot": ["area", 0.09290304], "square feet": ["area", 0.09290304],
+    "yd2": ["area", 0.83612736], "yd²": ["area", 0.83612736], "sqyd": ["area", 0.83612736], "square yard": ["area", 0.83612736], "square yards": ["area", 0.83612736],
+    "in2": ["area", 0.00064516], "in²": ["area", 0.00064516], "sqin": ["area", 0.00064516], "square inch": ["area", 0.00064516],
+    "mi2": ["area", 2589988.110336], "mi²": ["area", 2589988.110336], "sqmi": ["area", 2589988.110336], "square mile": ["area", 2589988.110336], "square miles": ["area", 2589988.110336],
+    // energy (base: joule)
+    "j": ["energy", 1], "joule": ["energy", 1], "joules": ["energy", 1],
+    "kj": ["energy", 1000], "kilojoule": ["energy", 1000], "kilojoules": ["energy", 1000],
+    "mj": ["energy", 1e6], "megajoule": ["energy", 1e6],
+    "gj": ["energy", 1e9], "gigajoule": ["energy", 1e9],
+    "cal": ["energy", 4.184], "calorie": ["energy", 4.184], "calories": ["energy", 4.184],
+    "kcal": ["energy", 4184], "kilocalorie": ["energy", 4184], "kilocalories": ["energy", 4184],
+    "wh": ["energy", 3600], "watthour": ["energy", 3600], "watthours": ["energy", 3600],
+    "kwh": ["energy", 3.6e6], "kilowatthour": ["energy", 3.6e6], "kilowatthours": ["energy", 3.6e6],
+    "mwh": ["energy", 3.6e9], "megawatthour": ["energy", 3.6e9],
+    "btu": ["energy", 1055.05585262], "btus": ["energy", 1055.05585262], "british thermal unit": ["energy", 1055.05585262],
+    "ev": ["energy", 1.602176634e-19], "electronvolt": ["energy", 1.602176634e-19],
+    // power (base: watt)
+    "w": ["power", 1], "watt": ["power", 1], "watts": ["power", 1],
+    "kw": ["power", 1000], "kilowatt": ["power", 1000], "kilowatts": ["power", 1000],
+    "mw": ["power", 1e6], "megawatt": ["power", 1e6], "megawatts": ["power", 1e6],
+    "gw": ["power", 1e9], "gigawatt": ["power", 1e9],
+    "hp": ["power", 745.699872], "horsepower": ["power", 745.699872],
+    "ps": ["power", 735.49875],
+    // pressure (base: pascal)
+    "pa": ["pressure", 1], "pascal": ["pressure", 1], "pascals": ["pressure", 1],
+    "hpa": ["pressure", 100], "kpa": ["pressure", 1000], "mpa": ["pressure", 1e6],
+    "bar": ["pressure", 1e5], "bars": ["pressure", 1e5],
+    "psi": ["pressure", 6894.757293168],
+    "atm": ["pressure", 101325], "atmosphere": ["pressure", 101325], "atmospheres": ["pressure", 101325],
+    "mmhg": ["pressure", 133.322387415], "torr": ["pressure", 133.322368421],
+    // force (base: newton)
+    "n": ["force", 1], "newton": ["force", 1], "newtons": ["force", 1],
+    "kn": ["force", 1000], "kilonewton": ["force", 1000], "kilonewtons": ["force", 1000],
+    "kgf": ["force", 9.80665], "kilogram-force": ["force", 9.80665],
+    "lbf": ["force", 4.4482216152605], "pound-force": ["force", 4.4482216152605],
+    // frequency (base: hertz)
+    "hz": ["frequency", 1], "hertz": ["frequency", 1],
+    "khz": ["frequency", 1000], "mhz": ["frequency", 1e6], "ghz": ["frequency", 1e9],
+    "rpm": ["frequency", 1 / 60], "rps": ["frequency", 1],
+    // voltage (base: volt)
+    "v": ["voltage", 1], "volt": ["voltage", 1], "volts": ["voltage", 1],
+    "kv": ["voltage", 1000], "kilovolt": ["voltage", 1000], "kilovolts": ["voltage", 1000],
+    "mv": ["voltage", 0.001], "millivolt": ["voltage", 0.001],
+    // current (base: ampere)
+    "a": ["current", 1], "amp": ["current", 1], "amps": ["current", 1], "ampere": ["current", 1], "amperes": ["current", 1],
+    "ma": ["current", 0.001], "milliamp": ["current", 0.001], "milliamps": ["current", 0.001],
+    "ka": ["current", 1000], "kiloamp": ["current", 1000],
+    // resistance (base: ohm)
+    "ohm": ["resistance", 1], "ohms": ["resistance", 1], "ω": ["resistance", 1], "Ω": ["resistance", 1],
+    "kω": ["resistance", 1000], "kohm": ["resistance", 1000], "mω": ["resistance", 1e6], "mohm": ["resistance", 1e6],
+    // angle (base: radian)
+    "rad": ["angle", 1], "radian": ["angle", 1], "radians": ["angle", 1],
+    "deg": ["angle", 0.017453292519943295], "degree": ["angle", 0.017453292519943295], "degrees": ["angle", 0.017453292519943295], "°": ["angle", 0.017453292519943295],
+    "grad": ["angle", 0.015707963267948967], "gon": ["angle", 0.015707963267948967],
     // temperature (special formulas, no factor)
     "c": ["temp"], "celsius": ["temp"],
     "f": ["temp"], "fahrenheit": ["temp"],
@@ -677,26 +794,90 @@ Item {
     "rub": 92, "try": 35, "zar": 18.5, "aed": 3.67, "sar": 3.75, "qar": 3.64,
     "pln": 4.05, "czk": 23.5, "huf": 362, "ils": 3.7, "thb": 36, "myr": 4.4,
     "idr": 15800, "php": 57, "vnd": 25500, "egp": 49, "ngn": 1550, "kwd": 0.31,
-    "bdt": 110, "pkr": 278, "lkr": 300, "uzs": 12600, "kes": 130
+    "bdt": 110, "pkr": 278, "lkr": 300, "uzs": 12600, "kes": 130,
+    "uah": 41, "kzt": 470, "gel": 2.7, "crc": 520, "khr": 4050, "bob": 6.9,
+    "clp": 920, "cop": 4100, "pen": 3.7, "uyu": 40, "mnt": 3350, "mmk": 2100,
+    "afn": 70, "iqd": 1310, "lbp": 15000, "mad": 10, "dzd": 135
   })
 
   property var liveCurrencyRates: ({})
   property bool currencyRatesLoaded: false
-  property int currencyRatesFetchedAt: 0
+  // int (32-bit) cannot hold a Date.now() epoch, so this must be double.
+  property double currencyRatesFetchedAt: 0
   property bool currencyRatesFetching: false
+  property string fxApiKey: ""
+
+  // Currency symbols map to ISO codes so "100$ to €" behaves like "100 usd to eur".
+  readonly property var currencySymbols: ({
+    "$": "usd", "€": "eur", "£": "gbp", "¥": "jpy", "₹": "inr", "₽": "rub",
+    "₩": "krw", "₺": "try", "₴": "uah", "₫": "vnd", "฿": "thb", "₦": "ngn",
+    "₱": "php", "₪": "ils", "₸": "kzt", "₾": "gel", "₡": "crc", "r$": "brl"
+  })
+
+  // User config file: {"apiKey": "<exchangerate-api.com key>"}. Read live so an
+  // edit takes effect without restarting the shell. See the README.
+  readonly property string fxConfigPath: Quickshell.env("HOME") + "/.local/state/omarchy/settings/orenaksakal.calc-menu.json"
+  readonly property string fxStatePath: Quickshell.env("HOME") + "/.local/state/omarchy/settings/orenaksakal.calc-menu.fx.json"
+  readonly property int fxDailyMs: 24 * 3600 * 1000
+
+  FileView {
+    id: fxConfigFile
+    path: root.fxConfigPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try {
+        var cfg = JSON.parse(text())
+        root.fxApiKey = String(cfg && cfg.apiKey ? cfg.apiKey : "").trim()
+      } catch (e) { root.fxApiKey = "" }
+    }
+    onLoadFailed: root.fxApiKey = ""
+  }
+
+  // Persisted fetch state: {"fetchedAt": <ms>, "rates": {...}}. Survives shell
+  // restarts so the once-a-day fetch limit is honored across reboots too.
+  FileView {
+    id: fxStateFile
+    path: root.fxStatePath
+    watchChanges: false
+    printErrors: false
+    onLoaded: {
+      try {
+        var st = JSON.parse(text())
+        var at = st && typeof st.fetchedAt === "number" ? st.fetchedAt : 0
+        var rates = st && st.rates && typeof st.rates === "object" ? st.rates : null
+        var count = 0
+        if (rates) for (var c in rates) count++
+        if (rates && count > 0 && at > 0 && Date.now() - at < root.fxDailyMs) {
+          var normalized = ({})
+          for (var code in rates) normalized[String(code).toLowerCase()] = Number(rates[code])
+          root.liveCurrencyRates = normalized
+          root.currencyRatesLoaded = true
+          root.currencyRatesFetchedAt = at
+        } else if (at > 0) {
+          root.currencyRatesFetchedAt = at
+        }
+      } catch (e) { }
+    }
+    onLoadFailed: { }
+  }
 
   function currencyFactor(name) {
     var key = String(name || "").toLowerCase()
-    if (root.liveCurrencyRates[key] !== undefined) return Number(root.liveCurrencyRates[key])
-    var staticRate = root.staticCurrencyRates[key]
+    var code = root.currencySymbols[key] || key
+    if (root.liveCurrencyRates[code] !== undefined) return Number(root.liveCurrencyRates[code])
+    var staticRate = root.staticCurrencyRates[code]
     return staticRate !== undefined ? Number(staticRate) : undefined
   }
 
   function unitLookup(name) {
-    var key = String(name || "").toLowerCase().replace(/°/g, "")
-    var entry = root.unitTable[key]
+    var key = String(name || "").toLowerCase()
+    var stripped = key.replace(/°/g, "")
+    var entry = root.unitTable[stripped]
+    if (!entry) entry = root.unitTable[key]
     if (entry) {
-      if (entry[0] === "temp") return { category: "temp", key: key }
+      if (entry[0] === "temp") return { category: "temp", key: stripped }
       return { category: entry[0], factor: entry[1], key: key }
     }
     var factor = root.currencyFactor(key)
@@ -737,11 +918,15 @@ Item {
   // Parse "<amount> <from-unit> to|in <to-unit>" (units may touch the number,
   // e.g. "5ft in cm"). Returns { label, copy, approx } for a row, or null when
   // the text is not a conversion. approx is set when currency used the static
-  // fallback rate; a live fetch (if reachable) replaces it shortly after.
+  // fallback rate; a live fetch (if due) replaces it shortly after.
   function convertResult(input) {
     var text = String(input || "").toLowerCase().trim()
     if (!text || text.length > 200) return null
-    var m = text.match(/^(?:convert\s+)?(-?[0-9]+(?:\.[0-9]+)?)\s*([a-z°/]+(?:\s[a-z°/]+)?)\s+(?:to|in)\s+([a-z°/]+(?:\s[a-z°/]+)?)$/)
+    // Move a leading currency symbol behind the amount ("£100" -> "100£")
+    // so the amount-first grammar below handles it like "100£".
+    text = text.replace(/^([$€£¥₹₽₩₺₴₫฿₦₱₪₸₾₡])([0-9][0-9.]*)/, "$2$1")
+    var unitChars = "[a-z°/²³0-9Ω$€£¥₹₽₩₺₴₫฿₦₱₪₸₾₡-]+"
+    var m = text.match(new RegExp("^(?:convert\\s+)?(-?[0-9]+(?:\\.[0-9]+)?)\\s*(" + unitChars + "(?:\\s" + unitChars + ")?)\\s+(?:to|in)\\s+(" + unitChars + "(?:\\s" + unitChars + ")?)$"))
     if (!m) return null
 
     var amount = Number(m[1])
@@ -757,7 +942,7 @@ Item {
       result = root.convertTemp(amount, fromUnit, toUnit)
     } else if (from.category === "currency") {
       // Rates are "units of currency per 1 USD", so the conversion inverts
-      // relative to physical units. Kick off a live refresh in the background.
+      // relative to physical units. Kick off a live refresh if one is due.
       result = amount * to.factor / from.factor
       approx = !root.currencyRatesLoaded
       root.ensureCurrencyRates()
@@ -781,18 +966,37 @@ Item {
     }
   }
 
-  // Fetch fresh USD-anchored exchange rates in the background, once per shell
-  // session at most (refreshed every 6h; retried after 10min on failure).
-  // Static fallback rates keep currency working offline.
+  // Fetch USD-anchored exchange rates at most once per day, persisted across
+  // shell restarts (see fxStateFile), so the default keyless endpoint — or a
+  // configured exchangerate-api.com key on its 1,500 req/month free tier — is
+  // never hit more than ~31 times a month. A failed fetch is also remembered
+  // so it is not retried within the same day; static fallback rates keep
+  // currency working offline in the meantime.
   function ensureCurrencyRates() {
     if (root.currencyRatesFetching) return
     var age = Date.now() - root.currencyRatesFetchedAt
-    var cooldown = root.currencyRatesLoaded ? 6 * 3600 * 1000 : 10 * 60 * 1000
-    if (age < cooldown) return
+    if (age < root.fxDailyMs) return
     root.currencyRatesFetching = true
+    var url = "https://open.er-api.com/v6/latest/USD"
+    if (root.fxApiKey) url = "https://v6.exchangerate-api.com/v6/" + root.fxApiKey + "/latest/USD"
     ratesProc.collected = ""
-    ratesProc.command = ["bash", "-lc", "curl -fsSL --max-time 6 https://open.er-api.com/v6/latest/USD"]
+    ratesProc.command = ["bash", "-lc", "curl -fsSL --max-time 8 " + Util.shellQuote(url)]
     ratesProc.running = true
+  }
+
+  // Persist {fetchedAt, rates} to disk so a restart doesn't refetch within the
+  // day. Written via bash to keep the JSON out of the shell's argv quoting.
+  function saveRatesState() {
+    var payload = JSON.stringify({ fetchedAt: root.currencyRatesFetchedAt, rates: root.liveCurrencyRates })
+    var dir = root.fxStatePath.replace(/\/[^/]*$/, "")
+    var cmd = "mkdir -p " + Util.shellQuote(dir) + " && printf '%s\\n' " + Util.shellQuote(payload) + " > " + Util.shellQuote(root.fxStatePath)
+    ratesStateProc.command = ["bash", "-lc", cmd]
+    ratesStateProc.running = true
+  }
+
+  function markRatesAttempted() {
+    root.currencyRatesFetchedAt = Date.now()
+    root.saveRatesState()
   }
 
   // A search-time row that shows the result of a calculation or conversion and
@@ -1363,21 +1567,33 @@ if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
     }
     onExited: function(exitCode, exitStatus) {
       root.currencyRatesFetching = false
-      root.currencyRatesFetchedAt = Date.now()
-      if (exitCode !== 0 || exitStatus !== 0) return
+      if (exitCode !== 0 || exitStatus !== 0) {
+        root.markRatesAttempted()
+        return
+      }
       try {
         var parsed = JSON.parse(ratesProc.collected)
-        if (parsed && parsed.rates && typeof parsed.rates === "object") {
-          // The API keys codes in uppercase ("EUR"); normalize to lowercase so
-          // unitLookup's lowercase keys resolve against live rates.
+        // open.er-api.com answers under "rates"; exchangerate-api.com under
+        // "conversion_rates". Both are USD-anchored.
+        var raw = parsed && (parsed.conversion_rates || parsed.rates)
+        if (parsed && raw && typeof raw === "object") {
           var normalized = ({})
-          for (var code in parsed.rates) normalized[String(code).toLowerCase()] = Number(parsed.rates[code])
+          for (var code in raw) normalized[String(code).toLowerCase()] = Number(raw[code])
           root.liveCurrencyRates = normalized
           root.currencyRatesLoaded = true
+          root.currencyRatesFetchedAt = Date.now()
+          root.saveRatesState()
           if (root.opened) root.rebuildDisplay()
+          return
         }
       } catch (e) { }
+      root.markRatesAttempted()
     }
+  }
+
+  Process {
+    id: ratesStateProc
+    running: false
   }
 
   PanelWindow {
