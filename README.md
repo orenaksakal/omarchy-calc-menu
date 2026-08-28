@@ -9,6 +9,13 @@ It is a drop-in replacement for the stock `omarchy.menu`: installing and
 enabling this plugin automatically routes the Go menu (and its bar button) to
 Calc Menu.
 
+## Screenshots
+
+![Calculation](screenshots/calc.png)
+![Length conversion](screenshots/length.png)
+![Currency conversion](screenshots/currency.png)
+![Temperature conversion](screenshots/temperature.png)
+
 ## Installation
 
 ```bash
