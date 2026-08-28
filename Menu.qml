@@ -43,10 +43,6 @@ Item {
 
   function ping() { return "ok" }
 
-  function calcDebug(input) {
-    return String(root.calcResult(String(input || "")))
-  }
-
   property string fontFamily: Style.font.menuFamily
   // JSONC menu definitions. The shell parses both at startup and merges
   // the user file on top of the defaults, so the keybind → IPC → visible
