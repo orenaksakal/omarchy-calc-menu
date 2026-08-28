@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "orenaksakal.calc-menu",
+  "name": "Calc Menu",
+  "version": "1.0.0",
+  "author": "orenaksakal",
+  "description": "Omarchy command menu with a built-in calculator: type an expression like \"2 + 5\" in the search box and the result appears inline. Enter copies it to the clipboard.",
+  "kinds": [
+    "menu",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "menu": "Menu.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Calc Menu",
+    "description": "Launches the Omarchy menu (with calculator)",
+    "category": "Compositor",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.menu"
+  }
+}
