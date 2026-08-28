@@ -822,16 +822,64 @@ Item {
 
   // ---- bounded local reads -------------------------------------------------
   //
-  // Config and persisted-rate files are read through a single bash helper that
-  // refuses symlinks, requires a regular file owned by the current user, and
-  // caps how many bytes reach QML (descriptor-bound, no-follow). Content is
-  // then parsed with per-field limits so only a bounded API key and bounded
-  // currency-code/value entries ever reach the shell.
+  // Config and persisted-rate files are read and written through tiny Python
+  // helpers (python3 is a base Arch package) that open a single descriptor
+  // with O_NOFOLLOW | O_NONBLOCK and fstat THE SAME descriptor for
+  // type/owner/mode before touching any byte — a path swap between check and
+  // use cannot substitute a symlink, FIFO, or other file. State is published
+  // through a same-directory temp descriptor that stays open for chmod,
+  // bounded write, and fsync, then is atomically renamed into place.
 
   readonly property int fxMaxLocalBytes: 8192
   readonly property int fxMaxApiKeyLength: 64
   readonly property int fxMaxRateEntries: 200
   readonly property int fxMaxRateBytes: 65536
+
+  readonly property string fxReadPython:
+    "import os, sys, stat\n"
+    + "path = sys.argv[1]; maxb = int(sys.argv[2])\n"
+    + "try:\n"
+    + "    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)\n"
+    + "except OSError:\n"
+    + "    sys.exit(1)\n"
+    + "try:\n"
+    + "    st = os.fstat(fd)\n"
+    + "    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or (st.st_mode & 0o022):\n"
+    + "        sys.exit(1)\n"
+    + "    total = 0\n"
+    + "    while total < maxb:\n"
+    + "        data = os.read(fd, min(4096, maxb - total))\n"
+    + "        if not data:\n"
+    + "            break\n"
+    + "        sys.stdout.buffer.write(data)\n"
+    + "        total += len(data)\n"
+    + "finally:\n"
+    + "    os.close(fd)\n"
+
+  readonly property string fxWritePython:
+    "import os, sys, stat, tempfile\n"
+    + "d = sys.argv[1]; f = sys.argv[2]; payload = sys.argv[3].encode('utf-8')\n"
+    + "if len(payload) > 8192:\n"
+    + "    sys.exit(1)\n"
+    + "fd = -1; tmp = ''\n"
+    + "try:\n"
+    + "    fd, tmp = tempfile.mkstemp(dir=d, prefix='.fx.')\n"
+    + "    st = os.fstat(fd)\n"
+    + "    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():\n"
+    + "        sys.exit(1)\n"
+    + "    os.fchmod(fd, 0o600)\n"
+    + "    os.write(fd, payload)\n"
+    + "    os.fsync(fd)\n"
+    + "    os.close(fd); fd = -1\n"
+    + "    os.rename(tmp, f); tmp = ''\n"
+    + "except OSError:\n"
+    + "    sys.exit(1)\n"
+    + "finally:\n"
+    + "    if fd >= 0:\n"
+    + "        os.close(fd)\n"
+    + "    if tmp:\n"
+    + "        try: os.unlink(tmp)\n"
+    + "        except OSError: pass\n"
 
   function queueLocalRead(target, path) {
     if (localReadProc.running) {
@@ -845,10 +893,7 @@ Item {
   }
 
   function boundedReadCommand(path) {
-    var f = Util.shellQuote(path)
-    // -L/-f/-O reject symlinks and require an owned regular file; `timeout`
-    // bounds the read in case the path is raced to a FIFO after the checks.
-    return "f=" + f + "; [ -L \"$f\" ] && exit 1; [ -f \"$f\" ] || exit 1; [ -O \"$f\" ] || exit 1; timeout 1 head -c " + root.fxMaxLocalBytes + " \"$f\""
+    return "python3 - " + Util.shellQuote(path) + " " + root.fxMaxLocalBytes + " <<'PYFX'\n" + root.fxReadPython + "PYFX"
   }
 
   function applyLocalRead(target, raw) {
@@ -1037,19 +1082,16 @@ Item {
   }
 
   // Persist {fetchedAt, rates} to disk so a restart doesn't refetch within the
-  // day. Written through a same-directory temporary file with private
-  // permissions and atomically renamed, so the predictable state path never
+  // day. A same-directory temp descriptor (opened with O_EXCL) stays open for
+  // chmod, bounded write, and fsync, then is atomically renamed — it never
   // follows a pre-existing symlink or truncates another target.
   function saveRatesState() {
     var payload = JSON.stringify({ fetchedAt: root.currencyRatesFetchedAt, rates: root.liveCurrencyRates })
     if (!payload || payload.length > root.fxMaxLocalBytes) return
     var dir = root.fxStatePath.replace(/\/[^/]*$/, "")
-    var cmd = "d=" + Util.shellQuote(dir) + "; f=" + Util.shellQuote(root.fxStatePath)
-      + "; mkdir -p \"$d\" || exit 1"
-      + "; tmp=$(mktemp \"$d/.fx.XXXXXX\") || exit 1"
-      + "; chmod 600 \"$tmp\""
-      + "; printf '%s\\n' " + Util.shellQuote(payload) + " > \"$tmp\" || { rm -f \"$tmp\"; exit 1; }"
-      + "; mv -f \"$tmp\" \"$f\" || { rm -f \"$tmp\"; exit 1; }"
+    var cmd = "mkdir -p " + Util.shellQuote(dir)
+      + " && python3 - " + Util.shellQuote(dir) + " " + Util.shellQuote(root.fxStatePath) + " " + Util.shellQuote(payload)
+      + " <<'PYFX'\n" + root.fxWritePython + "PYFX"
     ratesStateProc.command = ["bash", "-c", cmd]
     ratesStateProc.running = true
   }

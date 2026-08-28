@@ -31,9 +31,9 @@ omarchy plugin remove orenaksakal.calc-menu --yes
 
 Requirements: an Omarchy system (Hyprland + Wayland). `wl-copy` (from
 `wl-clipboard`) is used to copy results — it ships with every Wayland desktop.
-No calculator packages (`qalc`, `bc`, python) are needed; everything runs in
-the shell plugin itself. Live currency rates additionally use `curl`, which is
-present on any Arch base install.
+No calculator packages (`qalc`, `bc`) are needed; the calculation engine runs
+in the shell plugin itself. Live currency rates use `curl`, and secure
+config/state file I/O uses `python3` — both base Arch packages.
 
 ## Usage
 
@@ -150,16 +150,18 @@ omarchy restart shell
 - Calculations are whitelist-based: only digits, operators, `π pi √ ^ ! %` and
   parentheses ever reach the parser — no `eval`/`Function`, so a query cannot
   execute code.
-- The API-key config and persisted-rate files are read through a bounded,
-  no-follow helper that refuses symlinks, requires a regular file owned by the
-  current user, and caps bytes at 8 KB. The API key is limited to 64
-  alphanumeric characters before it is embedded in a curl URL.
+- The API-key config and persisted-rate files are read through descriptor-bound
+  Python helpers: a single `open()` with `O_NOFOLLOW | O_NONBLOCK`, `fstat` on
+  **the same descriptor** for regular-file/owner/mode, and bytes capped at
+  8 KB. A path swap between check and use cannot substitute a symlink, FIFO, or
+  different file.
 - Live rate responses are capped at 64 KB (`curl --max-filesize` plus a buffer
   ceiling) and only bounded currency-code/value pairs (≤ 200 entries, short
   codes, sane values) are kept.
-- The persisted-rate state is written through a same-directory temporary file
-  with `600` permissions, then atomically renamed — it never follows a
-  pre-existing symlink or truncates another target.
+- The persisted-rate state is published through a same-directory temp
+  descriptor (opened with `O_EXCL`) held open for `fchmod`/bounded
+  write/`fsync`, then atomically renamed — it never follows a pre-existing
+  symlink or truncates another target.
 
 ## License
 
