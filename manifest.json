@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "orenaksakal.calc-menu",
   "name": "Calc Menu",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "orenaksakal",
-  "description": "Omarchy command menu with a built-in calculator: type an expression like \"2 + 5\" in the search box and the result appears inline. Enter copies it to the clipboard.",
+  "description": "Calculator + unit/currency converter built into the Omarchy Go menu. Type \"2 + 5\", \"10 km to miles\", or \"100 usd to eur\" in the search box; the result appears inline and Enter copies it to the clipboard. Live exchange rates fetched once per day (configurable API key).",
   "kinds": [
     "menu",
     "bar-widget"
