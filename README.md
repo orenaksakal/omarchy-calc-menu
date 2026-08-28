@@ -51,7 +51,11 @@ present on any Arch base install.
 | `2^3^2`             | 512      |
 | `√16` or `sqrt(16)` | 4        |
 | `5!`                | 120 (factorial) |
-| `2*pi` or `2π`      | 6.283... |
+| `2*pi` or `2π`      | 6.28 |
+
+Results are rounded to **two decimals** (trailing zeros dropped); whole numbers
+display exactly. Values too small for two decimals and very large magnitudes
+use compact scientific notation (e.g. `1.23e-4`).
 
 The parser is whitelist-based — only digits, operators, `π pi √ ^ ! %` and
 parentheses are accepted, so a query can never execute code.
@@ -63,13 +67,13 @@ touch the unit):
 
 | You type                 | Result |
 |--------------------------|--------|
-| `10 km to miles`         | 10 km → 6.213712 miles |
+| `10 km to miles`         | 10 km → 6.21 miles |
 | `5ft in cm`              | 5 ft → 152.4 cm |
 | `2 hours to minutes`     | 2 hours → 120 minutes |
-| `100°f to c`             | 100 °f → 37.777778 c |
-| `1 ha to acres`          | 1 ha → 2.471054 acres |
-| `60 mph to km/h`         | 60 mph → 96.56064 km/h |
-| `1 bar to psi`           | 1 bar → 14.503774 psi |
+| `100°f to c`             | 100 °f → 37.78 c |
+| `1 ha to acres`          | 1 ha → 2.47 acres |
+| `60 mph to km/h`         | 60 mph → 96.56 km/h |
+| `1 bar to psi`           | 1 bar → 14.5 psi |
 | `1 kwh to kj`            | 1 kwh → 3600 kj |
 | `1 light-year to km`     | 1 light-year → 9460730472580.8 km |
 | `1 mt to kg`             | 1 mt → 1000000000 kg |
@@ -86,10 +90,10 @@ ISO codes, common abbreviations, and currency symbols are all accepted:
 
 | You type      | Result |
 |---------------|--------|
-| `100 usd to eur` | 100 USD → 85.8266 EUR |
-| `100$ to €`   | 100 $ → 85.8266 € |
+| `100 usd to eur` | 100 USD → 85.83 EUR |
+| `100$ to €`   | 100 $ → 85.83 € |
 | `£100 to ¥`   | 100 £ → 18860.76 ¥ |
-| `50 eur in usd` | 50 EUR → 58.256997 USD |
+| `50 eur in usd` | 50 EUR → 58.26 USD |
 
 Rates are fetched **once per day** (see below) and cached on disk, so currency
 works offline between refreshes. Rows built on the built-in fallback table are

@@ -617,7 +617,7 @@ Item {
       return ""
     }
     if (typeof value !== "number" || !isFinite(value)) return ""
-    return String(Math.round(value * 1e10) / 1e10)
+    return root.formatNumber(value)
   }
 
   // ------------------------------------------------- unit & time conversion
@@ -906,13 +906,17 @@ Item {
     return celsius + 273.15
   }
 
-  // Format a conversion result to a reasonable number of significant digits,
-  // dropping trailing zeros.
+  // Format a result for display. Whole numbers stay exact; anything else is
+  // rounded to two decimals (trailing zeros dropped) like money. Values too
+  // small for two decimals, and very large magnitudes, fall back to a compact
+  // exponential form rather than showing a misleading "0".
   function formatNumber(value) {
     if (value === 0) return "0"
+    if (!isFinite(value)) return ""
     var abs = Math.abs(value)
-    var digits = abs >= 10000 ? 2 : abs >= 1 ? 6 : abs >= 0.0001 ? 8 : 10
-    return String(Number(value.toFixed(digits)))
+    if (Math.floor(value) === value && abs < 1e21) return String(value)
+    if (abs >= 1e21 || (abs > 0 && abs < 0.005)) return value.toExponential(2).replace(/\.?0+e/, "e")
+    return String(Number(value.toFixed(2)))
   }
 
   // Parse "<amount> <from-unit> to|in <to-unit>" (units may touch the number,
